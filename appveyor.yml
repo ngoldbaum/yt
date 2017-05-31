@@ -1,6 +1,9 @@
 # AppVeyor.com is a Continuous Integration service to build and run tests under
 # Windows
 
+init:
+  - ps: iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
+
 environment:
 
   global:
@@ -35,3 +38,6 @@ build: false
 
 test_script:
   - "nosetests --nologcapture -sv yt"
+
+on_finish:
+  - ps: $blockRdp = $true; iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
