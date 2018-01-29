@@ -159,7 +159,6 @@ class FieldFileHandler(object):
         It should be generic enough for most of the cases, but it the
         *structure* of your fluid file is non-canonial, change this.
         '''
-
         if getattr(self, '_offset', None) is not None:
             return self._offset
 
@@ -169,8 +168,9 @@ class FieldFileHandler(object):
             nskip = len(self.attrs)
             fpu.skip(f, nskip)
 
-            # It goes: level, CPU, 8-variable (1 cube)
+            # It goes: level, CPU, 2**ndim-variable (1 cube)
             min_level = self.domain.ds.min_level
+            ndim = self.domain.ds.dimensionality
             n_levels = self.domain.amr_header['nlevelmax'] - min_level
             offset = np.zeros(n_levels, dtype='int64')
             offset -= 1
@@ -182,20 +182,14 @@ class FieldFileHandler(object):
                                  amr_header['ncpu']):
                     header = ( ('file_ilevel', 1, 'I'),
                                ('file_ncache', 1, 'I') )
-                    try:
-                        hvals = fpu.read_attrs(f, header, "=")
-                    except AssertionError:
-                        mylog.error(
-                            "You are running with the wrong number of fields. "
-                            "If you specified these in the load command, check the array length. "
-                            "In this file there are %s hydro fields." % skipped)
-                        raise
-                    if hvals['file_ncache'] == 0: continue
+                    hvals = fpu.read_attrs(f, header, "=")
+                    if hvals['file_ncache'] == 0:
+                        continue
                     assert(hvals['file_ilevel'] == level+1)
                     if cpu + 1 == self.domain_id and level >= min_level:
                         offset[level - min_level] = f.tell()
                         level_count[level - min_level] = hvals['file_ncache']
-                    skipped = fpu.skip(f, 8 * nvar)
+                    skipped = fpu.skip(f, 2**ndim * nvar)
         self._offset = offset
         self._level_count = level_count
         return self._offset

@@ -49,6 +49,7 @@ from yt.arraytypes import blankRecordArray
 from yt.utilities.lib.cosmology_time import \
     friedman
 
+
 class RAMSESDomainFile(object):
     _last_mask = None
     _last_selector_id = None
@@ -163,40 +164,41 @@ class RAMSESDomainFile(object):
         # So we initially assume that.
         max_level = 0
         nx, ny, nz = (((i-1.0)/2.0) for i in self.amr_header['nx'])
+        ndim = self.ds.dimensionality
         for level in range(self.amr_header['nlevelmax']):
             # Easier if do this 1-indexed
             for cpu in range(self.amr_header['nboundary'] + self.amr_header['ncpu']):
                 #ng is the number of octs on this level on this domain
                 ng = _ng(cpu, level)
-                if ng == 0: continue
+                if ng == 0:
+                    continue
+                # read grid index, one integer
                 ind = fpu.read_vector(f, "I").astype("int64")  # NOQA
+                # skip 2 integers for next and previous index
                 fpu.skip(f, 2)
-                pos = np.empty((ng, 3), dtype='float64')
-                pos[:,0] = fpu.read_vector(f, "d") - nx
-                pos[:,1] = fpu.read_vector(f, "d") - ny
-                pos[:,2] = fpu.read_vector(f, "d") - nz
-                #pos *= self.ds.domain_width
-                #pos += self.dataset.domain_left_edge
-                fpu.skip(f, 31)
-                #parents = fpu.read_vector(f, "I")
-                #fpu.skip(f, 6)
-                #children = np.empty((ng, 8), dtype='int64')
-                #for i in range(8):
-                #    children[:,i] = fpu.read_vector(f, "I")
-                #cpu_map = np.empty((ng, 8), dtype="int64")
-                #for i in range(8):
-                #    cpu_map[:,i] = fpu.read_vector(f, "I")
-                #rmap = np.empty((ng, 8), dtype="int64")
-                #for i in range(8):
-                #    rmap[:,i] = fpu.read_vector(f, "I")
-                # We don't want duplicate grids.
+                # read grid centers, ndim doubles
+                pos = np.ones((ng, 3), dtype='float64') * 0.5
+                pos[:, 0] = fpu.read_vector(f, "d") - nx
+                if ndim > 1:
+                    pos[:, 1] = fpu.read_vector(f, "d") - ny
+                if ndim > 2:
+                    pos[:, 2] = fpu.read_vector(f, "d") - nz
+                # We want to skip the following fields:
+                # father index (one integer),
+                # neighbor index (2*ndim integers),
+                # child index (2**ndim integers),
+                # cpu map  (2**ndim integers),
+                # refinement map (2**ndim integers)
+                fpu.skip(f, 1 + 2*ndim + 3*2**ndim)
+                # Check for duplicate grids in the octree structure
                 # Note that we're adding *grids*, not individual cells.
                 if level >= min_level:
                     assert(pos.shape[0] == ng)
                     n = self.oct_handler.add(cpu + 1, level - min_level, pos,
                                 count_boundary = 1)
                     self._error_check(cpu, level, pos, n, ng, (nx, ny, nz))
-                    if n > 0: max_level = max(level - min_level, max_level)
+                    if n > 0:
+                        max_level = max(level - min_level, max_level)
         self.max_level = max_level
         self.oct_handler.finalize()
 
@@ -242,6 +244,7 @@ class RAMSESDomainSubset(OctreeSubset):
         # Here we get a copy of the file, which we skip through and read the
         # bits we want.
         oct_handler = self.oct_handler
+        ndim = self.ds.dimensionality
         all_fields = [f for ft, f in file_handler.field_list]
         fields = [f for ft, f in fields]
         tr = {}
@@ -260,15 +263,16 @@ class RAMSESDomainSubset(OctreeSubset):
             tmp = {}
             # Initalize temporary data container for io
             for field in all_fields:
-                tmp[field] = np.empty((nc, 8), dtype="float64")
-            for i in range(8):
+                tmp[field] = np.empty((nc, 2**ndim), dtype="float64")
+            for i in range(2**ndim):
                 # Read the selected fields
                 for field in all_fields:
                     if field not in fields:
                         fpu.skip(content)
                     else:
                         tmp[field][:,i] = fpu.read_vector(content, 'd') # i-th cell
-
+                        import pdb; pdb.set_trace()
+            import pdb; pdb.set_trace()
             oct_handler.fill_level(level, levels, cell_inds, file_inds, tr, tmp)
         return tr
 
@@ -540,14 +544,18 @@ class RAMSESDataset(Dataset):
                 dom, mi, ma = f.readline().split()
                 self.hilbert_indices[int(dom)] = (float(mi), float(ma))
 
-        if rheader['ordering type'] != 'hilbert' and self.bbox:
+        if rheader['ordering type'] != 'hilbert' and self._bbox:
             raise NotImplementedError(
                 'The ordering %s is not compatible with the `bbox` argument.'
                 % rheader['ordering type'])
         self.parameters.update(rheader)
+        if 'ndim' in self.parameters:
+            self.dimensionality = int(self.parameters['ndim'])
         self.domain_left_edge = np.zeros(3, dtype='float64')
         self.domain_dimensions = np.ones(3, dtype='int32') * \
                         2**(self.min_level+1)
+        if self.dimensionality < 3:
+            self.domain_dimensions[self.dimensionality:] = 1
         self.domain_right_edge = np.ones(3, dtype='float64')
         # This is likely not true, but it's not clear how to determine the boundary conditions
         self.periodicity = (True, True, True)
