@@ -983,10 +983,7 @@ def create_profile(data_source, bin_fields, fields, n_bins=64,
     extrema = sanitize_field_tuple_keys(extrema, data_source)
     logs = sanitize_field_tuple_keys(logs, data_source)
 
-    if any(is_pfield) and not all(is_pfield):
-        raise YTIllDefinedProfile(
-            bin_fields, data_source._determine_fields(fields), wf, is_pfield)
-    elif len(bin_fields) == 1:
+    if len(bin_fields) == 1:
         cls = Profile1D
     elif len(bin_fields) == 2 and all(is_pfield):
         if deposition == 'cic':
